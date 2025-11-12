@@ -1,0 +1,12 @@
+Language: Cpp
+Standard: Latest
+
+AlignAfterOpenBracket: BlockIndent
+AllowShortFunctionsOnASingleLine: None
+BreakBeforeBraces: Allman
+BreakTemplateDeclarations: Yes
+ColumnLimit: 100
+IndentWidth: 4
+PointerAlignment: Left
+TabWidth: 4
+UseTab: Never
