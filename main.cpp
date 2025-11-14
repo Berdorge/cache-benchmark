@@ -337,19 +337,22 @@ std::uint64_t find_cache_line_size()
         debug_logger << "stride=" << stride << " result=" << result.count() << "\n";
     }
 
+    std::uint64_t cache_line_stride = 1;
+    double max_speedup = 1.0;
+
     for (std::size_t i = 1; i < results.size(); ++i)
     {
         std::uint64_t stride = (min_stride << i);
         measure_t result = results[i];
         measure_t previous_result = results[i - 1];
-        if (result / previous_result >= 1.8)
+        if (result / previous_result >= max_speedup)
         {
-            return stride / 2;
+            max_speedup = result / previous_result;
+            cache_line_stride = stride / 2;
         }
-        previous_result = result;
     }
 
-    return 0;
+    return cache_line_stride;
 }
 
 int main(int argc, char** argv)
