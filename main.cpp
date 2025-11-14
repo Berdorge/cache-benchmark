@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -6,6 +7,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 constexpr std::uint64_t max_discover_mem = 1 << 15;
@@ -18,11 +20,12 @@ struct
 {
     bool enabled = false;
 
-    auto& operator<<(auto value)
+    template <typename T>
+    auto& operator<<(T&& value)
     {
         if (enabled)
         {
-            std::cerr << value;
+            std::cerr << std::forward<T>(value);
         }
         return *this;
     }
@@ -169,13 +172,15 @@ std::uint64_t next_spots(std::uint64_t stride, std::uint64_t spots)
     }
 }
 
-auto median(auto& container)
+template <typename Container>
+auto median(Container& container)
 {
     std::sort(container.begin(), container.end());
     return container[container.size() / 2];
 }
 
-auto sum(auto const& container)
+template <typename Container>
+auto sum(Container const& container)
 {
     auto result = container[0];
     for (std::size_t i = 1; i < container.size(); ++i)
@@ -185,8 +190,9 @@ auto sum(auto const& container)
     return result;
 }
 
+template <typename Spots, typename Method>
 std::map<std::uint64_t, std::vector<measure_t>>
-measure(std::uint64_t stride, auto const& all_spots, auto const& method)
+measure(std::uint64_t stride, Spots const& all_spots, Method const& method)
 {
     constexpr int iterations = 9;
 
@@ -196,6 +202,7 @@ measure(std::uint64_t stride, auto const& all_spots, auto const& method)
     {
         std::cerr << "stride " << stride << "; iteration " << i + 1 << " out of " << iterations
                   << "\r";
+        debug_logger << "\n";
         for (std::uint64_t spots : all_spots)
         {
             rng_seed = spots + i;
@@ -258,9 +265,10 @@ std::vector<std::uint64_t> find_rest_spots(std::uint64_t initial_stride)
             debug_logger << "final stride=" << stride << "\n";
             for (auto& spots : all_spots)
             {
-                debug_logger << "spots=" << spots << " prev=" << sum(prev_measured[spots])
-                             << " full=" << sum(new_measured[spots])
-                             << " half=" << sum(new_measured[spots / 2 + spots % 2]) << "\n";
+                debug_logger << "spots=" << spots << " prev=" << sum(prev_measured[spots]).count()
+                             << " full=" << sum(new_measured[spots]).count()
+                             << " half=" << sum(new_measured[spots / 2 + spots % 2]).count()
+                             << "\n";
                 spots *= stride / 2 / initial_stride;
             }
 
@@ -293,8 +301,8 @@ find_jump(std::uint64_t initial_stride, std::vector<std::uint64_t> const& search
     {
         std::uint64_t spots = search_spots[i];
         auto result = sum(measured[spots]);
-        debug_logger << "spots=" << spots << " result=" << result
-                     << " smooth_suffix=" << smooth_suffix[i] << "\n";
+        debug_logger << "spots=" << spots << " result=" << result.count()
+                     << " smooth_suffix=" << smooth_suffix[i].count() << "\n";
     }
 
     for (std::size_t i = 0; i < search_spots.size() - 1; ++i)
@@ -315,23 +323,30 @@ find_jump(std::uint64_t initial_stride, std::vector<std::uint64_t> const& search
 
 std::uint64_t find_cache_line_size()
 {
-    constexpr std::uint64_t baseline_stride = 2;
+    constexpr std::uint64_t min_stride = 2;
     constexpr std::uint64_t max_stride = 128;
 
-    std::uint64_t baseline_spots = max_check_mem / baseline_stride;
-    auto baseline_measure =
-        measure(baseline_stride, std::vector{baseline_spots}, measure_lookbehind);
-    auto baseline_result = median(baseline_measure[baseline_spots]);
+    std::vector<measure_t> results;
 
-    for (std::uint64_t stride = baseline_stride * 2; stride <= max_stride; stride *= 2)
+    for (std::uint64_t stride = min_stride; stride <= max_stride; stride *= 2)
     {
         std::uint64_t spots = max_check_mem / stride;
         auto measured = measure(stride, std::vector{spots}, measure_lookbehind);
-        auto result = median(measured[spots]);
-        if (result / baseline_result >= 2.0)
+        measure_t result = median(measured[spots]);
+        results.push_back(result);
+        debug_logger << "stride=" << stride << " result=" << result.count() << "\n";
+    }
+
+    for (std::size_t i = 1; i < results.size(); ++i)
+    {
+        std::uint64_t stride = (min_stride << i);
+        measure_t result = results[i];
+        measure_t previous_result = results[i - 1];
+        if (result / previous_result >= 1.8)
         {
             return stride / 2;
         }
+        previous_result = result;
     }
 
     return 0;
