@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <set>
@@ -135,23 +136,6 @@ auto measure_shuffled(std::uint64_t stride, std::uint64_t spots)
     }
 
     return measure_walk(stride, spots, stride / 2);
-}
-
-auto measure_lookbehind(std::uint64_t stride, std::uint64_t spots)
-{
-    constexpr std::uint32_t lookbehind_offset = 16;
-
-    create_forward_chain(stride, spots);
-
-    for (std::uint32_t i = 0; i < spots; ++i)
-    {
-        std::uint64_t behind_index = (i + spots - lookbehind_offset) % spots;
-        std::uint64_t* behind_ptr = &a[behind_index * stride + stride / 2];
-        *behind_ptr = a[i * stride];
-        a[i * stride] = reinterpret_cast<std::uint64_t>(behind_ptr);
-    }
-
-    return measure_walk(stride, spots, 0);
 }
 
 std::uint64_t next_spots(std::uint64_t stride, std::uint64_t spots)
@@ -321,38 +305,43 @@ find_jump(std::uint64_t initial_stride, std::vector<std::uint64_t> const& search
     return 0;
 }
 
-std::uint64_t find_cache_line_size()
+std::uint64_t find_cache_line_size(std::uint64_t initial_stride, std::uint64_t jump)
 {
-    constexpr std::uint64_t min_stride = 2;
-    constexpr std::uint64_t max_stride = 128;
-
-    std::vector<measure_t> results;
-
-    for (std::uint64_t stride = min_stride; stride <= max_stride; stride *= 2)
+    for (std::uint64_t stride = initial_stride; stride <= 64; stride *= 2)
     {
-        std::uint64_t spots = max_check_mem / stride;
-        auto measured = measure(stride, std::vector{spots}, measure_lookbehind);
-        measure_t result = median(measured[spots]);
-        results.push_back(result);
-        debug_logger << "stride=" << stride << " result=" << result.count() << "\n";
-    }
-
-    std::uint64_t cache_line_stride = 1;
-    double max_speedup = 1.0;
-
-    for (std::size_t i = 1; i < results.size(); ++i)
-    {
-        std::uint64_t stride = (min_stride << i);
-        measure_t result = results[i];
-        measure_t previous_result = results[i - 1];
-        if (result / previous_result >= max_speedup)
+        auto stride1 = stride;
+        auto stride2 = stride + stride / 2;
+        std::vector<std::uint64_t> spots{1};
+        while (spots.back() * stride1 / initial_stride <= jump)
         {
-            max_speedup = result / previous_result;
-            cache_line_stride = stride / 2;
+            spots.push_back(next_spots(stride1, spots.back()));
+        }
+
+        auto measured1 = measure(stride1, spots, measure_shuffled);
+        auto measured2 = measure(stride2, spots, measure_shuffled);
+
+        double relative_difference = 0;
+        for (std::size_t i = spots.size() - 2; i < spots.size(); ++i)
+        {
+            std::uint64_t s = spots[i];
+            auto result1 = sum(measured1[s]);
+            auto result2 = sum(measured2[s]);
+            relative_difference += result2.count() / result1.count();
+            debug_logger << "stride=" << stride << " spots=" << s << " result1=" << result1.count()
+                         << " result2=" << result2.count() << "\n";
+        }
+
+        relative_difference /= 2;
+        debug_logger << "stride=" << stride << " relative_difference=" << relative_difference
+                     << "\n";
+
+        if (relative_difference <= 1.10)
+        {
+            return stride;
         }
     }
 
-    return cache_line_stride;
+    return 0;
 }
 
 int main(int argc, char** argv)
@@ -368,10 +357,13 @@ int main(int argc, char** argv)
 
     std::cerr << "Measuring cache line size\n";
 
-    std::uint64_t cache_line_size = find_cache_line_size();
+    std::uint64_t associativity = jump / rest_spots.front();
+    std::uint64_t cache_size = jump * initial_stride * sizeof(std::uint64_t);
+    std::uint64_t cache_line_size =
+        find_cache_line_size(initial_stride, jump) * sizeof(std::uint64_t);
 
-    std::cout << "associativity=" << jump / rest_spots.front();
-    std::cout << " cache_size=" << jump * initial_stride * sizeof(std::uint64_t);
-    std::cout << " cache_line_size=" << cache_line_size * sizeof(std::uint64_t);
+    std::cout << "associativity=" << associativity;
+    std::cout << " cache_size=" << cache_size;
+    std::cout << " cache_line_size=" << cache_line_size;
     std::cout << "\n";
 }
